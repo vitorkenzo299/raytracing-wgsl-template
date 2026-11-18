@@ -1,6 +1,39 @@
 fn hit_sphere(center: vec3f, radius: f32, r: ray, record: ptr<function, hit_record>, max: f32)
 {
+  record.hit_anything = false;
 
+  // Substituindo o raio na equação da esfera, obtemos a*t² + b*t + c = 0.
+  let oc = r.origin - center;
+  let a = dot(r.direction, r.direction);
+  let b = 2.0 * dot(oc, r.direction);
+  let c = dot(oc, oc) - radius * radius;
+  let delta = b * b - 4.0 * a * c;
+  if (delta < 0.0)
+  {
+    return;
+  }
+
+  // Primeiro tentamos a interseção mais próxima; depois, a mais distante.
+  let sqrt_delta = sqrt(delta);
+  var t = (-b - sqrt_delta) / (2.0 * a);
+  if (t < RAY_TMIN || t > max)
+  {
+    t = (-b + sqrt_delta) / (2.0 * a);
+    if (t < RAY_TMIN || t > max)
+    {
+      return;
+    }
+  }
+
+  record.t = t;
+  record.p = ray_at(r, t);
+  record.normal = (record.p - center) / radius;
+  record.frontface = dot(r.direction, record.normal) < 0.0;
+  if (!record.frontface)
+  {
+    record.normal = -record.normal;
+  }
+  record.hit_anything = true;
 }
 
 fn hit_quad(r: ray, Q: vec4f, u: vec4f, v: vec4f, record: ptr<function, hit_record>, max: f32)
