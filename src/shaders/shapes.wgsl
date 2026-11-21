@@ -89,7 +89,13 @@ fn hit_triangle(r: ray, v0: vec3f, v1: vec3f, v2: vec3f, record: ptr<function, h
   var n = cross(v1v0, v2v0);
   var q = cross(rov0, r.direction);
 
-  var d = 1.0 / dot(r.direction, n);
+  let denominator = dot(r.direction, n);
+  if (abs(denominator) < 0.00000001)
+  {
+    record.hit_anything = false;
+    return;
+  }
+  var d = 1.0 / denominator;
 
   var u = d * dot(-q, v2v0);
   var v = d * dot(q, v1v0);
@@ -115,33 +121,104 @@ fn hit_triangle(r: ray, v0: vec3f, v1: vec3f, v2: vec3f, record: ptr<function, h
 
 fn hit_box(r: ray, center: vec3f, rad: vec3f, record: ptr<function, hit_record>, t_max: f32)
 {
-  var m = 1.0 / r.direction;
-  var n = m * (r.origin - center);
-  var k = abs(m) * rad;
+  record.hit_anything = false;
+  var near = -1e30;
+  var far = 1e30;
 
-  var t1 = -n - k;
-  var t2 = -n + k;
-
-  var tN = max(max(t1.x, t1.y), t1.z);
-  var tF = min(min(t2.x, t2.y), t2.z);
-
-  if (tN > tF || tF < 0.0)
+  // Intersecta os intervalos de entrada e saída dos três eixos.
+  for (var axis = 0; axis < 3; axis = axis + 1)
   {
-    record.hit_anything = false;
-    return;
+    if (abs(r.direction[axis]) < 0.00000001)
+    {
+      if (r.origin[axis] < center[axis] - rad[axis] || r.origin[axis] > center[axis] + rad[axis])
+      {
+        return;
+      }
+    }
+    else
+    {
+      let t1 = (center[axis] - rad[axis] - r.origin[axis]) / r.direction[axis];
+      let t2 = (center[axis] + rad[axis] - r.origin[axis]) / r.direction[axis];
+      near = max(near, min(t1, t2));
+      far = min(far, max(t1, t2));
+      if (near > far)
+      {
+        return;
+      }
+    }
   }
 
-  var t = tN;
+  var t = near;
+  if (t < RAY_TMIN)
+  {
+    t = far;
+  }
   if (t < RAY_TMIN || t > t_max)
   {
-    record.hit_anything = false;
     return;
   }
 
   record.t = t;
   record.p = ray_at(r, t);
-  record.normal = -sign(r.direction) * step(t1.yzx, t1.xyz) * step(t1.zxy, t1.xyz);
+  let face = (record.p - center) / rad;
+  let distance = abs(face);
+  if (distance.x >= distance.y && distance.x >= distance.z)
+  {
+    record.normal = vec3f(sign(face.x), 0.0, 0.0);
+  }
+  else if (distance.y >= distance.z)
+  {
+    record.normal = vec3f(0.0, sign(face.y), 0.0);
+  }
+  else
+  {
+    record.normal = vec3f(0.0, 0.0, sign(face.z));
+  }
+  record.frontface = dot(r.direction, record.normal) < 0.0;
+  if (!record.frontface)
+  {
+    record.normal = -record.normal;
+  }
   record.hit_anything = true;
+}
 
-  return;
+// Cilindro vertical finito: esta versão calcula apenas a lateral, sem tampas.
+fn hit_cylinder(r: ray, center: vec3f, radius: f32, half_height: f32, record: ptr<function, hit_record>, t_max: f32)
+{
+  record.hit_anything = false;
+  let oc = r.origin - center;
+  let a = dot(r.direction.xz, r.direction.xz);
+  if (a < 0.00000001 || radius <= 0.0 || half_height <= 0.0)
+  {
+    return;
+  }
+
+  let b = 2.0 * dot(oc.xz, r.direction.xz);
+  let c = dot(oc.xz, oc.xz) - radius * radius;
+  let delta = b * b - 4.0 * a * c;
+  if (delta < 0.0)
+  {
+    return;
+  }
+
+  let sqrt_delta = sqrt(delta);
+  var t = (-b - sqrt_delta) / (2.0 * a);
+  for (var root = 0; root < 2; root = root + 1)
+  {
+    let point = ray_at(r, t);
+    if (t >= RAY_TMIN && t <= t_max && abs(point.y - center.y) <= half_height)
+    {
+      record.t = t;
+      record.p = point;
+      record.normal = vec3f(point.x - center.x, 0.0, point.z - center.z) / radius;
+      record.frontface = dot(r.direction, record.normal) < 0.0;
+      if (!record.frontface)
+      {
+        record.normal = -record.normal;
+      }
+      record.hit_anything = true;
+      return;
+    }
+    t = (-b + sqrt_delta) / (2.0 * a);
+  }
 }

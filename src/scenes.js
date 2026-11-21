@@ -1,4 +1,4 @@
-import { Sphere, Quad, Box, Mesh } from './objects.js';
+import { Sphere, Quad, Box, Cylinder, Mesh } from './objects.js';
 import { loadMesh, getObjBoundingBox, getSpheresRandom } from './util.js';
 
 const groundDefault = new Sphere([0, -1001, 0], [0.7, 0.7, 0.7], 1000, [0.9, 0.0, 0.6, 0.0]);
@@ -431,6 +431,31 @@ async function Suzzanne()
         sunIntensity: 1.0,
         samplesPerPixel: 1.0,
         maxBounces: 10.0
+    };
+}
+
+// Cena própria com dois cilindros abertos, vidro e uma luz retangular.
+async function Cylinders()
+{
+    return {
+        spheres: [new Sphere([1.0, -0.45, -3.3], [1, 1, 1], 0.55, [-1, 0, 0.9, 0])],
+        quads: [
+            new Quad([-5, -1, 2, 0], [10, 0, 0, 0], [0, 0, -12, 0], [0.65, 0.65, 0.65, 1], [0, 0, 0, 0]),
+            new Quad([-1.5, 2, -4, 0], [3, 0, 0, 0], [0, 0, 2, 0], [1, 0.9, 0.75, 1], [0, 0, 0, 4]),
+        ],
+        boxes: [
+            new Cylinder([-1.0, -0.35, -3.3], [0.85, 0.2, 0.1], 0.45, 1.3, [0, 0, 0, 0]),
+            new Cylinder([0.15, -0.55, -2.5], [0.2, 0.6, 0.9], 0.4, 0.9, [1, 0.08, 1, 0]),
+        ],
+        triangles: [],
+        meshes: [],
+        backgroundColor1: [0.05, 0.08, 0.15],
+        backgroundColor2: [0.5, 0.7, 1],
+        focusDistance: 3,
+        focusAngle: 0,
+        sunIntensity: 0.3,
+        samplesPerPixel: 3,
+        maxBounces: 15,
     };
 }
 

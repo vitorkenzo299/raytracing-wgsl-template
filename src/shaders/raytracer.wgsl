@@ -154,6 +154,11 @@ fn envoriment_color(direction: vec3f, color1: vec3f, color2: vec3f) -> vec3f
 fn check_ray_collision(r: ray, max: f32) -> hit_record
 {
   var spheresCount = i32(uniforms[19]);
+  var quadsCount = i32(uniforms[20]);
+  var boxesCount = i32(uniforms[21]);
+  var trianglesCount = i32(uniforms[22]);
+  var meshesCount = i32(uniforms[27]);
+
   var closest = hit_record();
   closest.t = max;
   var record = hit_record();
@@ -168,6 +173,72 @@ fn check_ray_collision(r: ray, max: f32) -> hit_record
       record.object_color = object.color;
       record.object_material = object.material;
       closest = record;
+    }
+  }
+
+  for (var i = 0; i < quadsCount; i = i + 1)
+  {
+    let object = quadsb[i];
+    hit_quad(r, object.Q, object.u, object.v, &record, closest.t);
+    if (record.hit_anything)
+    {
+      record.object_color = object.color;
+      record.object_material = object.material;
+      record.frontface = true;
+      closest = record;
+    }
+  }
+
+  for (var i = 0; i < boxesCount; i = i + 1)
+  {
+    let object = boxesb[i];
+    // Caixas e cilindros usam o mesmo espaço no buffer: center.w indica o tipo.
+    // As rotações ficam fora desta etapa.
+    if (object.center.w == 1.0)
+    {
+      hit_cylinder(r, object.center.xyz, object.radius.x, object.radius.y, &record, closest.t);
+    }
+    else
+    {
+      hit_box(r, object.center.xyz, object.radius.xyz, &record, closest.t);
+    }
+    if (record.hit_anything)
+    {
+      record.object_color = object.color;
+      record.object_material = object.material;
+      closest = record;
+    }
+  }
+
+  for (var i = 0; i < meshesCount; i = i + 1)
+  {
+    let object = meshb[i];
+    // Leva o raio para as coordenadas da malha, usando apenas posição e escala.
+    // Não normalizar a direção aqui mantém t na mesma escala do raio original.
+    let local_ray = ray((r.origin - object.transform.xyz) / object.scale.xyz, r.direction / object.scale.xyz);
+    if (!AABB_intersect(local_ray, object.min.xyz, object.max.xyz))
+    {
+      continue;
+    }
+
+    let end = min(i32(object.end), trianglesCount);
+    for (var j = i32(object.start); j < end; j = j + 1)
+    {
+      let triangle = trianglesb[j];
+      hit_triangle(local_ray, triangle.v0.xyz, triangle.v1.xyz, triangle.v2.xyz, &record, closest.t);
+      if (record.hit_anything)
+      {
+        record.p = ray_at(r, record.t);
+        record.normal = normalize(record.normal / object.scale.xyz);
+        record.frontface = dot(r.direction, record.normal) < 0.0;
+        if (!record.frontface)
+        {
+          record.normal = -record.normal;
+        }
+        record.object_color = object.color;
+        record.object_material = object.material;
+        closest = record;
+      }
     }
   }
 
@@ -208,13 +279,43 @@ fn metal(normal : vec3f, direction: vec3f, fuzz: f32, random_sphere: vec3f) -> m
 }
 
 fn dielectric(normal : vec3f, r_direction: vec3f, refraction_index: f32, frontface: bool, random_sphere: vec3f, fuzz: f32, rng_state: ptr<function, u32>) -> material_behaviour
-{  
-  return material_behaviour(false, vec3f(0.0));
+{
+  var ratio = refraction_index;
+  if (frontface)
+  {
+    ratio = 1.0 / refraction_index;
+  }
+
+  let direction = normalize(r_direction);
+  let cos_theta = min(dot(-direction, normal), 1.0);
+  let sin_theta = sqrt(max(0.0, 1.0 - cos_theta * cos_theta));
+
+  // Aproximação de Schlick: o vidro reflete mais quando visto de lado.
+  var r0 = (1.0 - ratio) / (1.0 + ratio);
+  r0 = r0 * r0;
+  let reflectance = r0 + (1.0 - r0) * pow(1.0 - cos_theta, 5.0);
+  var scattered = vec3f(0.0);
+  if (ratio * sin_theta > 1.0 || rng_next_float(rng_state) < reflectance)
+  {
+    scattered = reflect(direction, normal);
+  }
+  else
+  {
+    scattered = refract(direction, normal, ratio);
+  }
+
+  scattered += clamp(fuzz, 0.0, 1.0) * random_sphere;
+  if (dot(scattered, scattered) < 0.00000001)
+  {
+    scattered = normal;
+  }
+  return material_behaviour(true, normalize(scattered));
 }
 
 fn emmisive(color: vec3f, light: f32) -> material_behaviour
 {
-  return material_behaviour(false, vec3f(0.0));
+  // Emissão encerra o caminho; direction transporta a radiância emitida.
+  return material_behaviour(false, color * light);
 }
 
 fn trace(r: ray, rng_state: ptr<function, u32>) -> vec3f
@@ -236,24 +337,37 @@ fn trace(r: ray, rng_state: ptr<function, u32>) -> vec3f
 
     let albedo = record.object_color.xyz;
     let material = record.object_material;
-    if (material.x < 0.0)
+    if (material.w > 0.0)
     {
-      return vec3f(0.0);
+      let emission = emmisive(albedo, material.w);
+      return color * emission.direction;
     }
 
+    // material: smoothness, absorption/fuzz, specular, light.
     let random_sphere = rng_next_vec3_in_unit_sphere(rng_state);
     let smoothness = clamp(material.x, 0.0, 1.0);
+    let specular = clamp(material.z, 0.0, 1.0);
     var behaviour = material_behaviour();
 
-    if (rng_next_float(rng_state) < smoothness)
+    if (material.x < 0.0)
+    {
+      behaviour = dielectric(record.normal, current_ray.direction, 1.5, record.frontface, random_sphere, material.y, rng_state);
+      color *= albedo;
+    }
+    // Specular é a chance de escolher um reflexo em vez do espalhamento difuso.
+    else if (rng_next_float(rng_state) < specular)
     {
       behaviour = metal(record.normal, current_ray.direction, material.y, random_sphere);
+      let diffuse_direction = record.normal + random_sphere;
+      behaviour.direction = mix(diffuse_direction, behaviour.direction, smoothness);
+      // Um reflexo mais liso conserva mais a cor do metal.
+      color *= mix(vec3f(1.0), albedo, smoothness);
     }
     else
     {
       behaviour = lambertian(record.normal, material.y, random_sphere, rng_state);
+      color *= albedo;
     }
-    color *= albedo;
 
     if (!behaviour.scatter)
     {
@@ -264,7 +378,9 @@ fn trace(r: ray, rng_state: ptr<function, u32>) -> vec3f
     {
       behaviour.direction = record.normal;
     }
-    current_ray = ray(record.p, normalize(behaviour.direction));
+    // Um deslocamento pequeno evita atingir de novo a mesma superfície.
+    let direction = normalize(behaviour.direction);
+    current_ray = ray(record.p + direction * 0.001, direction);
   }
 
   return vec3f(0.0);

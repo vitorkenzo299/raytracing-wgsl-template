@@ -8,6 +8,7 @@ let quads = [];
 let boxes = [];
 let triangles = [];
 let meshes = [];
+let loadedSceneIndex = 0;
 
 // variables and constants
 const THREAD_COUNT = 16;
@@ -89,7 +90,8 @@ const boxesBuffer = await getComputeBuffer(gpu, boxesBufferSize, GPUBufferUsage.
 const trianglesBufferSize = (sizes.vec4 * 3) * MAX_TRIANGLES;
 const trianglesBuffer = await getComputeBuffer(gpu, trianglesBufferSize, GPUBufferUsage.COPY_DST | GPUBufferUsage.STORAGE);
 
-const meshesBufferSize = (sizes.vec4 * 7 + 3 * sizes.f32) * MAX_MESHES;
+// O alinhamento do WGSL reserva 128 bytes para cada Mesh.
+const meshesBufferSize = sizes.vec4 * 8 * MAX_MESHES;
 const meshesBuffer = await getComputeBuffer(gpu, meshesBufferSize, GPUBufferUsage.COPY_DST | GPUBufferUsage.STORAGE);
 
 const frameBuffers = [{ buffer: frameBuffer, type: "storage" }, { buffer: rayTraceFrameBuffer, type: "storage" }];
@@ -241,7 +243,7 @@ function refreshObjectGUI(template, objectList, parentFolder, folder, startIndex
 
     for (let i = startIndex; i < objectList.length; i++)
     {
-        let folder = objectFolder.addFolder(`${template.name} ${i + 1}`);
+        let folder = objectFolder.addFolder(`${objectList[i].name} ${i + 1}`);
         for (let j = 1; j < variables.length; j++)
         {
             let folderVariable = folder.addFolder(variables[j]);
@@ -285,6 +287,7 @@ function refreshObjectGUI(template, objectList, parentFolder, folder, startIndex
 
                     for (let k = 0; k < lengthOfVariable; k++)
                     {
+                        if (variables[j] == "center" && k == 3) continue;
                         folderVariable.add(objectList[i][variables[j]], k.toString()).name(k == 0 ? "X" : k == 1 ? "Y" : k == 2 ? "Z" : "W").step(0.01).listen();
                     }
 
@@ -410,11 +413,24 @@ function handleAccumulate(accumulate, timeAccumulate = true)
 
 async function getScene(index)
 {
+    let scene;
+    try
+    {
+        scene = await getAvailableScene(index, availableScenes);
+    }
+    catch (error)
+    {
+        scenesNames.name = loadedSceneIndex;
+        console.error('Não foi possível carregar a cena:', error);
+        alert('Não foi possível carregar a cena. Confira se o servidor continua rodando e se os arquivos da pasta media estão disponíveis.');
+        return;
+    }
+
     let bg1, bg2, focusDistance, focusAngle, sunIntensity, samplesPerPixel, maxBounces;
     ({spheres : spheres, quads : quads, boxes : boxes, 
         triangles: triangles, meshes: meshes, backgroundColor1 : bg1, 
         backgroundColor2 : bg2, focusDistance: focusDistance, focusAngle: 
-        focusAngle, sunIntensity: sunIntensity, samplesPerPixel: samplesPerPixel, maxBounces: maxBounces} = await getAvailableScene(index, availableScenes));
+        focusAngle, sunIntensity: sunIntensity, samplesPerPixel: samplesPerPixel, maxBounces: maxBounces} = scene);
     
     uniforms.focusDistance = focusDistance;
     uniforms.focusAngle = focusAngle;
@@ -427,6 +443,7 @@ async function getScene(index)
     writeUniforms();
     refreshObjectsGUI(0, true);
     handleAccumulate(false);
+    loadedSceneIndex = index;
 }
 
 function setup()
@@ -490,6 +507,11 @@ function writeBuffer(buffer, size, objectList)
             {
                 objectData[offset++] = objectList[i][variables[j]][k];
             }
+        }
+
+        if (objectList[i].name == "Mesh")
+        {
+            offset = Math.ceil(offset / 4) * 4;
         }
     }
 

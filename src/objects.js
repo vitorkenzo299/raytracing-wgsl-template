@@ -51,6 +51,18 @@ class Box
     }
 }
 
+// Cilindro vertical aberto: somente a lateral, sem tampas e sem rotação.
+class Cylinder extends Box
+{
+    constructor(center, color, radius, height, material)
+    {
+        super(center, color, [0, 0, 0], [radius, height / 2, radius], material);
+        this.name = "Cylinder";
+        // Compartilha o buffer das caixas; w = 1 identifica o cilindro no shader.
+        this.center[3] = 1.0;
+    }
+}
+
 class Triangle
 {
     name = "Triangle";
@@ -99,4 +111,4 @@ class Mesh
     }
 }
 
-export { Sphere, Quad, Box, Triangle, Mesh };
+export { Sphere, Quad, Box, Cylinder, Triangle, Mesh };
